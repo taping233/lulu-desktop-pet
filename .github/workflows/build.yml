@@ -1,0 +1,44 @@
+name: Build desktop packages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+      - name: Build Linux executable
+        run: bash build_linux.sh
+      - name: Package Linux artifact
+        run: |
+          cd dist
+          zip -r lulu-linux.zip lulu*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lulu-linux
+          path: dist/lulu-linux.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build macOS app
+        run: bash build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lulu-macos
+          path: dist/lulu-macos.zip
+
