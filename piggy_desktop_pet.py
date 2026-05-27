@@ -24,7 +24,8 @@ STARTUP_FRAME_NAME = "startup_frame.webp"
 AUTOSTART_NAME = "lulu在摸鱼"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTHOR_TEXT = "\u5236\u4f5c\u8005 github taping233"
-CELL_EDGE_TRIM_PX = 6
+CELL_EDGE_TRIM_X_PX = 6
+CELL_EDGE_TRIM_Y_PX = 0
 EDGE_MARGIN_PX = 24
 EDGE_ACTION_COOLDOWN = 18.0
 
@@ -539,14 +540,16 @@ class PiggyPet:
     @staticmethod
     def trim_cell_edges(image: Image.Image) -> Image.Image:
         image = image.convert("RGBA")
-        inset = min(CELL_EDGE_TRIM_PX, image.width // 2, image.height // 2)
-        if inset <= 0:
+        inset_x = min(CELL_EDGE_TRIM_X_PX, image.width // 2)
+        inset_y = min(CELL_EDGE_TRIM_Y_PX, image.height // 2)
+        if inset_x <= 0 and inset_y <= 0:
             return image
         alpha = image.getchannel("A")
-        for offset in range(inset):
+        for offset in range(inset_x):
             for y in range(image.height):
                 alpha.putpixel((offset, y), 0)
                 alpha.putpixel((image.width - 1 - offset, y), 0)
+        for offset in range(inset_y):
             for x in range(image.width):
                 alpha.putpixel((x, offset), 0)
                 alpha.putpixel((x, image.height - 1 - offset), 0)
