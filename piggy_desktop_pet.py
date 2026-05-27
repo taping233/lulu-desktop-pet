@@ -422,6 +422,7 @@ class PiggyPet:
         self.frame_index = 0
         self.repeat_left = 0
         self.sequence: list[tuple[str, int]] = []
+        self.persistent_action_state: str | None = None
         self.auto_at = time.monotonic() + 30
         self.edge_last_at = 0.0
         self.last_action_index: int | None = None
@@ -442,6 +443,12 @@ class PiggyPet:
         for label, sequence in ACTIONS:
             self.action_menu.add_command(label=label, command=lambda seq=sequence: self.play_sequence(seq))
         self.menu.add_cascade(label="\u9009\u62e9\u52a8\u4f5c", menu=self.action_menu)
+        self.persistent_action_menu = tk.Menu(self.menu, tearoff=0)
+        for label, sequence in ACTIONS:
+            state = sequence[0][0]
+            self.persistent_action_menu.add_command(label=label, command=lambda s=state: self.hold_action(s))
+        self.menu.add_cascade(label="\u5e38\u6001\u7ef4\u6301\u52a8\u4f5c", menu=self.persistent_action_menu)
+        self.menu.add_command(label="\u53d6\u6d88\u5e38\u6001\u7ef4\u6301", command=self.clear_hold)
         self.menu.add_separator()
         self.menu.add_command(label="\u653e\u5927", command=lambda: self.resize(self.scale + 0.08))
         self.menu.add_command(label="\u7f29\u5c0f", command=lambda: self.resize(max(0.4, self.scale - 0.08)))
@@ -615,7 +622,10 @@ class PiggyPet:
         self.loading_frames = False
         self.frames = self.load_startup_frames()
         self.start_background_frame_load()
-        self.play(self.state)
+        if self.persistent_action_state:
+            self.hold_action(self.persistent_action_state)
+        else:
+            self.play(self.state)
 
     def start_background_frame_load(self) -> None:
         if self.loading_frames:
@@ -652,7 +662,9 @@ class PiggyPet:
         self.frames = self.photo_frames_from_pil(result)
         self.frames_ready = True
 
-    def play(self, state: str, repeats: int | None = None) -> None:
+    def play(self, state: str, repeats: int | None = None, clear_hold: bool = True) -> None:
+        if clear_hold:
+            self.persistent_action_state = None
         self.state = state
         self.frame_index = 0
         self.repeat_left = 999999 if state == "idle" else (repeats if repeats is not None else 2)
@@ -660,15 +672,28 @@ class PiggyPet:
             self.sequence = []
             self.auto_at = time.monotonic() + 30
 
-    def play_sequence(self, sequence: list[tuple[str, int]]) -> None:
+    def play_sequence(self, sequence: list[tuple[str, int]], clear_hold: bool = True) -> None:
+        if clear_hold:
+            self.persistent_action_state = None
         self.sequence = list(sequence)
         state, repeats = self.sequence.pop(0)
-        self.play_state_in_sequence(state, repeats)
+        self.play_state_in_sequence(state, repeats, clear_hold=False)
 
-    def play_state_in_sequence(self, state: str, repeats: int) -> None:
+    def play_state_in_sequence(self, state: str, repeats: int, clear_hold: bool = False) -> None:
+        if clear_hold:
+            self.persistent_action_state = None
         self.state = state
         self.frame_index = 0
         self.repeat_left = repeats
+
+    def hold_action(self, state: str) -> None:
+        self.persistent_action_state = state
+        self.sequence = []
+        self.play_state_in_sequence(state, 999999)
+
+    def clear_hold(self) -> None:
+        self.persistent_action_state = None
+        self.play("idle")
 
     def random_action(self) -> None:
         if not self.frames_ready:
@@ -789,7 +814,7 @@ class PiggyPet:
             sequence = [("action-18", 2), ("action-11", 1)]
         else:
             sequence = [("action-17", 1), ("action-11", 1)]
-        self.play_sequence(sequence)
+        self.play_sequence(sequence, clear_hold=False)
         self.show_speech(random.choice(EDGE_SAYINGS[edge]))
         return True
 
@@ -802,10 +827,14 @@ class PiggyPet:
     def on_release(self, event: tk.Event) -> None:
         if self.drag_moved:
             if not self.trigger_edge_animation(force=True):
-                self.play("idle")
+                if self.persistent_action_state:
+                    self.hold_action(self.persistent_action_state)
+                else:
+                    self.play("idle")
         else:
             self.show_speech(self.choose_saying())
-            self.random_action()
+            if not self.persistent_action_state:
+                self.random_action()
         self.drag_origin = None
         self.drag_start = None
         self.drag_last_x = None
@@ -895,6 +924,8 @@ class PiggyPet:
                     if self.sequence:
                         state, repeats = self.sequence.pop(0)
                         self.play_state_in_sequence(state, repeats)
+                    elif self.persistent_action_state:
+                        self.play_state_in_sequence(self.persistent_action_state, 999999)
                     else:
                         self.play("idle")
             elif time.monotonic() >= self.auto_at:

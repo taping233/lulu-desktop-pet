@@ -2,6 +2,8 @@
 
 一个基于 Tkinter 和 Pillow 的桌面宠物。左键点击会随机触发动作和气泡文字，拖动到屏幕边缘会触发贴边动画，右键菜单可以选择动作、缩放、设置开机启动或退出。
 
+右键菜单里的“常态维持动作”可以让桌宠持续循环某个动作；选择“取消常态维持”或“待机”会恢复普通模式。
+
 ## 本地运行
 
 ```bash
@@ -48,4 +50,3 @@ bash build_macos.sh
 仓库包含 GitHub Actions 工作流：每次 push 或手动触发时，会在 Ubuntu 和 macOS 上分别构建可下载 artifact。
 
 注意：PyInstaller 通常不能在 Windows 上交叉编译 macOS/Linux 原生程序。macOS 版本需要在 macOS runner 或 Mac 电脑上构建，Linux 版本需要在 Linux runner 或 Linux 机器上构建。
-
