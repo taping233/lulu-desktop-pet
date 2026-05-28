@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
+from typing import NamedTuple
 try:
     import winreg
 except ImportError:  # pragma: no cover - Windows-only feature.
@@ -31,10 +32,28 @@ EDGE_ACTION_COOLDOWN = 18.0
 
 ACTION_COUNT = 30
 
+
+class ScreenRect(NamedTuple):
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+    @property
+    def width(self) -> int:
+        return self.right - self.left
+
+    @property
+    def height(self) -> int:
+        return self.bottom - self.top
+
 STATES = [("idle", 0, 6, 150)] + [
     (f"action-{i:02d}", i, 6, 125) for i in range(1, ACTION_COUNT + 1)
 ]
 SMOOTH_FRAME_ORDER = (0, 1, 2, 3, 4, 5, 4, 3, 2, 1)
+STATE_FRAME_ORDERS = {
+    "action-30": (0, 1, 2, 3, 4, 5),
+}
 STATE_DELAYS = {"idle": 220, "action-03": 150, "action-04": 150}
 DEFAULT_ACTION_DELAY = 185
 
@@ -492,8 +511,9 @@ class PiggyPet:
                 crop = self.scale_image(crop, scale)
                 crop = self.prepare_for_color_key(crop)
                 images.append(crop)
-            if len(images) > max(SMOOTH_FRAME_ORDER):
-                images = [images[index] for index in SMOOTH_FRAME_ORDER]
+            frame_order = STATE_FRAME_ORDERS.get(name, SMOOTH_FRAME_ORDER)
+            if len(images) > max(frame_order):
+                images = [images[index] for index in frame_order]
             frames[name] = (images, self.delay_for_state(name, delay))
         return frames
 
@@ -757,22 +777,104 @@ class PiggyPet:
             ]
         return random.choice(options)
 
+    def tk_screen_rect(self) -> ScreenRect:
+        return ScreenRect(0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+
+    def monitor_work_areas(self) -> list[ScreenRect]:
+        if sys.platform != "win32":
+            return [self.tk_screen_rect()]
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", wintypes.LONG),
+                    ("top", wintypes.LONG),
+                    ("right", wintypes.LONG),
+                    ("bottom", wintypes.LONG),
+                ]
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", RECT),
+                    ("rcWork", RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+
+            monitors: list[ScreenRect] = []
+
+            def callback(hmonitor, _hdc, _rect, _data) -> int:
+                info = MONITORINFO()
+                info.cbSize = ctypes.sizeof(MONITORINFO)
+                if ctypes.windll.user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
+                    work = info.rcWork
+                    monitors.append(ScreenRect(work.left, work.top, work.right, work.bottom))
+                return 1
+
+            monitor_enum_proc = ctypes.WINFUNCTYPE(
+                wintypes.BOOL,
+                wintypes.HMONITOR,
+                wintypes.HDC,
+                ctypes.POINTER(RECT),
+                wintypes.LPARAM,
+            )
+            ctypes.windll.user32.EnumDisplayMonitors(0, 0, monitor_enum_proc(callback), 0)
+            if monitors:
+                return monitors
+        except Exception:
+            pass
+
+        return [self.tk_screen_rect()]
+
+    def screen_rect_for_bounds(self, x: int, y: int, width: int, height: int) -> ScreenRect:
+        monitors = self.monitor_work_areas()
+
+        def overlap_area(rect: ScreenRect) -> int:
+            overlap_w = max(0, min(x + width, rect.right) - max(x, rect.left))
+            overlap_h = max(0, min(y + height, rect.bottom) - max(y, rect.top))
+            return overlap_w * overlap_h
+
+        best = max(monitors, key=overlap_area)
+        if overlap_area(best) > 0:
+            return best
+
+        center_x = x + width // 2
+        center_y = y + height // 2
+
+        def distance_to_rect(rect: ScreenRect) -> int:
+            dx = max(rect.left - center_x, 0, center_x - rect.right)
+            dy = max(rect.top - center_y, 0, center_y - rect.bottom)
+            return dx * dx + dy * dy
+
+        return min(monitors, key=distance_to_rect)
+
+    def current_screen_rect(self) -> ScreenRect:
+        self.root.update_idletasks()
+        return self.screen_rect_for_bounds(
+            self.root.winfo_x(),
+            self.root.winfo_y(),
+            self.root.winfo_width(),
+            self.root.winfo_height(),
+        )
+
     def current_edges(self) -> list[str]:
         self.root.update_idletasks()
         x = self.root.winfo_x()
         y = self.root.winfo_y()
         width = self.root.winfo_width()
         height = self.root.winfo_height()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
+        screen = self.screen_rect_for_bounds(x, y, width, height)
         edges = []
-        if x <= EDGE_MARGIN_PX:
+        if x <= screen.left + EDGE_MARGIN_PX:
             edges.append("left")
-        if x + width >= sw - EDGE_MARGIN_PX:
+        if x + width >= screen.right - EDGE_MARGIN_PX:
             edges.append("right")
-        if y <= EDGE_MARGIN_PX:
+        if y <= screen.top + EDGE_MARGIN_PX:
             edges.append("top")
-        if y + height >= sh - EDGE_MARGIN_PX:
+        if y + height >= screen.bottom - EDGE_MARGIN_PX:
             edges.append("bottom")
         return edges
 
@@ -784,16 +886,15 @@ class PiggyPet:
         y = self.root.winfo_y()
         width = self.root.winfo_width()
         height = self.root.winfo_height()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
+        screen = self.screen_rect_for_bounds(x, y, width, height)
         if "left" in edges:
-            x = 0
+            x = screen.left
         elif "right" in edges:
-            x = max(0, sw - width)
+            x = screen.right - width
         if "top" in edges:
-            y = 0
+            y = screen.top
         elif "bottom" in edges:
-            y = max(0, sh - height)
+            y = screen.bottom - height
         self.root.geometry(f"+{x}+{y}")
         self.position_speech()
 
@@ -904,8 +1005,12 @@ class PiggyPet:
         if self.speech_window is None or not self.speech_window.winfo_exists():
             return
         self.speech_window.update_idletasks()
-        x = self.root.winfo_x() + max(0, (self.root.winfo_width() - self.speech_window.winfo_width()) // 2)
-        y = max(0, self.root.winfo_y() - self.speech_window.winfo_height() - 8)
+        screen = self.current_screen_rect()
+        speech_width = self.speech_window.winfo_width()
+        speech_height = self.speech_window.winfo_height()
+        x = self.root.winfo_x() + max(0, (self.root.winfo_width() - speech_width) // 2)
+        x = min(max(screen.left, x), max(screen.left, screen.right - speech_width))
+        y = max(screen.top, self.root.winfo_y() - speech_height - 8)
         self.speech_window.geometry(f"+{x}+{y}")
 
     def hide_speech(self) -> None:
